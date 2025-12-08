@@ -161,16 +161,186 @@ mc alias set myminio http://localhost:9508 admin supersecurepass123
 mc admin config set myminio api cors_config cors.json
 ```
 
+## Setup Traefik dan Cloudflare Tunnel
+
+MinIO dikonfigurasi untuk diakses melalui Traefik reverse proxy dengan Cloudflare Tunnel. Ini memungkinkan akses via subdomain dengan SSL/TLS otomatis.
+
+### Prasyarat
+
+1. **Traefik** sudah berjalan di server dan terhubung ke network `traefik-network`
+2. **Cloudflare Tunnel** sudah dikonfigurasi dan berjalan
+3. **Dua subdomain** sudah terdaftar di DNS Cloudflare:
+   - `minio-api.yourdomain.com` untuk S3 API
+   - `minio-console.yourdomain.com` untuk Console
+
+### Langkah 1: Konfigurasi Subdomain di docker-compose.yml
+
+Edit file `docker/docker-compose.yml` dan sesuaikan dengan konfigurasi Traefik Anda:
+
+1. **Ganti subdomain** sesuai dengan domain Anda:
+   ```yaml
+   # Ganti 'yourdomain.com' dengan domain Anda
+   - "traefik.http.routers.minio-api.rule=Host(`minio-api.yourdomain.com`)"
+   - "traefik.http.routers.minio-console.rule=Host(`minio-console.yourdomain.com`)"
+   ```
+
+2. **Sesuaikan entrypoint** jika berbeda (cek konfigurasi Traefik Anda):
+   ```yaml
+   # Default: websecure (untuk HTTPS)
+   # Jika berbeda, ganti dengan entrypoint Traefik Anda
+   - "traefik.http.routers.minio-api.entrypoints=websecure"
+   - "traefik.http.routers.minio-console.entrypoints=websecure"
+   ```
+
+3. **Sesuaikan certificate resolver** jika berbeda:
+   ```yaml
+   # Default: letsencrypt
+   # Jika berbeda, ganti dengan certificate resolver Traefik Anda
+   - "traefik.http.routers.minio-api.tls.certresolver=letsencrypt"
+   - "traefik.http.routers.minio-console.tls.certresolver=letsencrypt"
+   ```
+
+**Contoh:**
+- Jika domain Anda adalah `example.com`, maka:
+  - `minio-api.example.com` untuk S3 API
+  - `minio-console.example.com` untuk Console
+
+**⚠️ PENTING:** 
+- Pastikan entrypoint dan certificate resolver sesuai dengan konfigurasi Traefik yang sudah ada
+- Jika Traefik Anda menggunakan nama berbeda, sesuaikan label-label tersebut
+
+### Langkah 2: Konfigurasi DNS di Cloudflare
+
+1. Login ke **Cloudflare Dashboard**
+2. Pilih domain Anda
+3. Masuk ke **DNS** > **Records**
+4. Tambahkan 2 record CNAME:
+
+   **Record 1 - S3 API:**
+   - **Type:** CNAME
+   - **Name:** `minio-api` (atau `minio-api.yourdomain.com`)
+   - **Target:** `your-cloudflare-tunnel-id.cfargotunnel.com`
+   - **Proxy status:** Proxied (orange cloud)
+
+   **Record 2 - Console:**
+   - **Type:** CNAME
+   - **Name:** `minio-console` (atau `minio-console.yourdomain.com`)
+   - **Target:** `your-cloudflare-tunnel-id.cfargotunnel.com`
+   - **Proxy status:** Proxied (orange cloud)
+
+### Langkah 3: Konfigurasi Cloudflare Tunnel
+
+Edit file konfigurasi Cloudflare Tunnel (biasanya `config.yml` di folder cloudflared):
+
+```yaml
+tunnel: your-tunnel-id
+credentials-file: /path/to/credentials.json
+
+ingress:
+  # MinIO S3 API
+  - hostname: minio-api.yourdomain.com
+    service: http://traefik:80
+    originRequest:
+      noHappyEyeballs: true
+  
+  # MinIO Console
+  - hostname: minio-console.yourdomain.com
+    service: http://traefik:80
+    originRequest:
+      noHappyEyeballs: true
+  
+  # Catch-all rule (harus di akhir)
+  - service: http_status:404
+```
+
+**Catatan:** 
+- Ganti `yourdomain.com` dengan domain Anda
+- Pastikan Traefik container dapat diakses di `http://traefik:80` dari network yang sama
+- Jika Traefik menggunakan port lain, sesuaikan URL service
+
+### Langkah 4: Restart Services
+
+Setelah mengubah konfigurasi:
+
+1. **Restart Cloudflare Tunnel:**
+   ```bash
+   # Jika menggunakan systemd
+   sudo systemctl restart cloudflared
+   
+   # Atau jika menggunakan Docker
+   docker restart cloudflared
+   ```
+
+2. **Restart MinIO:**
+   ```bash
+   cd docker
+   docker compose restart
+   ```
+
+3. **Verifikasi Traefik mendeteksi MinIO:**
+   ```bash
+   docker logs traefik | grep minio
+   ```
+
+### Langkah 5: Verifikasi Konfigurasi Traefik
+
+Pastikan Traefik Anda memiliki konfigurasi berikut:
+
+1. **Entrypoint `websecure`** untuk HTTPS (port 443)
+2. **Certificate Resolver** (misalnya `letsencrypt`) untuk SSL/TLS otomatis
+3. **Docker provider** aktif untuk auto-discovery
+
+Contoh konfigurasi Traefik (`traefik.yml`):
+```yaml
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: your-email@example.com
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: traefik-network
+```
+
 ## Akses MinIO
 
-### MinIO Console (Web UI)
+### Via Subdomain (Recommended)
+
+Setelah setup Traefik dan Cloudflare Tunnel selesai:
+
+**MinIO Console (Web UI):**
+```
+https://minio-console.yourdomain.com
+```
+- Username: `admin`
+- Password: `Rubysa179596!` (atau sesuai konfigurasi Anda)
+
+**MinIO S3 API:**
+```
+https://minio-api.yourdomain.com
+```
+
+### Akses Langsung (Alternatif)
+
+Jika port mapping masih aktif (uncomment di docker-compose.yml):
+
+**MinIO Console (Web UI):**
 ```
 http://server-ip:9507
 ```
-- Username: `admin`
-- Password: `supersecurepass123` (atau sesuai konfigurasi Anda)
 
-### MinIO S3 API
+**MinIO S3 API:**
 ```
 http://server-ip:9508
 ```
@@ -272,6 +442,121 @@ Atau tambahkan di `docker-compose.yml` container lain:
 networks:
   - traefik-network
 ```
+
+### Traefik Tidak Mendeteksi MinIO
+
+1. **Cek label Traefik di container:**
+   ```bash
+   docker inspect cloudstorage-minio | grep -A 20 Labels
+   ```
+
+2. **Verifikasi Traefik membaca Docker provider:**
+   ```bash
+   docker logs traefik | grep -i "docker\|minio"
+   ```
+
+3. **Pastikan Traefik terhubung ke network yang sama:**
+   ```bash
+   docker network inspect traefik-network | grep -A 5 cloudstorage-minio
+   docker network inspect traefik-network | grep -A 5 traefik
+   ```
+
+4. **Cek entrypoint dan certificate resolver:**
+   - Pastikan entrypoint `websecure` ada di Traefik
+   - Pastikan certificate resolver `letsencrypt` dikonfigurasi dengan benar
+
+5. **Restart Traefik:**
+   ```bash
+   docker restart traefik
+   ```
+
+### Subdomain Tidak Bisa Diakses
+
+1. **Cek DNS di Cloudflare:**
+   - Pastikan CNAME record sudah dibuat
+   - Pastikan proxy status aktif (orange cloud)
+   - Tunggu beberapa menit untuk propagasi DNS
+
+2. **Cek Cloudflare Tunnel:**
+   ```bash
+   # Jika menggunakan systemd
+   sudo systemctl status cloudflared
+   sudo journalctl -u cloudflared -f
+   
+   # Atau jika menggunakan Docker
+   docker logs cloudflared
+   ```
+
+3. **Verifikasi konfigurasi Cloudflare Tunnel:**
+   - Pastikan hostname di config.yml sesuai dengan subdomain
+   - Pastikan service mengarah ke `http://traefik:80` (atau port Traefik yang sesuai)
+
+4. **Test koneksi dari server:**
+   ```bash
+   # Test apakah Traefik bisa diakses
+   curl -H "Host: minio-api.yourdomain.com" http://localhost
+   curl -H "Host: minio-console.yourdomain.com" http://localhost
+   ```
+
+5. **Cek SSL Certificate:**
+   - Pastikan Let's Encrypt certificate sudah terbit
+   - Cek di Traefik dashboard atau logs
+
+### Error 404 atau Bad Gateway
+
+1. **Cek apakah MinIO container berjalan:**
+   ```bash
+   docker ps | grep minio
+   ```
+
+2. **Cek routing Traefik:**
+   ```bash
+   docker exec traefik wget -O- http://cloudstorage-minio:9000
+   docker exec traefik wget -O- http://cloudstorage-minio:9001
+   ```
+
+3. **Verifikasi label Traefik:**
+   - Pastikan `traefik.enable=true` ada
+   - Pastikan hostname di rule sesuai dengan subdomain
+   - Pastikan port service sesuai (9000 untuk API, 9001 untuk Console)
+
+4. **Cek Traefik dashboard:**
+   - Akses Traefik dashboard (biasanya di `http://traefik:8080`)
+   - Lihat apakah router dan service MinIO terdeteksi
+
+### SSL Certificate Tidak Terbit
+
+1. **Cek Let's Encrypt logs di Traefik:**
+   ```bash
+   docker logs traefik | grep -i acme
+   docker logs traefik | grep -i certificate
+   ```
+
+2. **Pastikan email di certificate resolver valid:**
+   ```yaml
+   certificatesResolvers:
+     letsencrypt:
+       acme:
+         email: your-email@example.com  # Pastikan email valid
+   ```
+
+3. **Cek rate limit Let's Encrypt:**
+   - Let's Encrypt memiliki rate limit
+   - Jika terlalu banyak request, tunggu beberapa jam
+
+4. **Gunakan DNS challenge jika HTTP challenge gagal:**
+   ```yaml
+   certificatesResolvers:
+     letsencrypt:
+       acme:
+         email: your-email@example.com
+         storage: /letsencrypt/acme.json
+         dnsChallenge:
+           provider: cloudflare
+           resolvers:
+             - "1.1.1.1:53"
+             - "1.0.0.1:53"
+   ```
 
 ## Keamanan
 
