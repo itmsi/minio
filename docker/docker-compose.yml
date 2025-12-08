@@ -7,7 +7,7 @@ services:
       - "9507:9001"    # MinIO Console
     environment:
       MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: supersecurepass123
+      MINIO_ROOT_PASSWORD: Rubysa179596!
     volumes:
       - /home/msiserver/cloudstorage/data:/data
     command: server /data --console-address ":9001"
