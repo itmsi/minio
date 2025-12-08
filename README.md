@@ -269,6 +269,7 @@ Setelah mengubah konfigurasi:
    
    # Atau jika menggunakan Docker
    docker restart cloudflared
+   docker compose restart cloudflared
    ```
 
 2. **Restart MinIO:**
