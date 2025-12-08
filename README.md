@@ -43,11 +43,11 @@ minio/
 Pastikan direktori untuk data MinIO sudah ada dan memiliki permission yang tepat:
 
 ```bash
-sudo mkdir -p /home/msiserver/cloudstorage/data
-sudo chown -R $USER:$USER /home/msiserver/cloudstorage/data
+sudo mkdir -p /home/msiserver/minio/data
+sudo chown -R $USER:$USER /home/msiserver/minio/data
 ```
 
-**Catatan:** Sesuaikan path `/home/msiserver/cloudstorage/data` sesuai dengan struktur direktori di server Anda.
+**Catatan:** Sesuaikan path `/home/msiserver/minio/data` sesuai dengan struktur direktori di server Anda.
 
 ### 2. Credentials
 
@@ -101,8 +101,8 @@ docker network create traefik-network
 ### Langkah 3: Buat Direktori Data
 
 ```bash
-mkdir -p /home/msiserver/cloudstorage/data
-chmod -R 755 /home/msiserver/cloudstorage/data
+mkdir -p /home/msiserver/minio/data
+chmod -R 755 /home/msiserver/minio/data
 ```
 
 ### Langkah 4: Jalankan MinIO
@@ -238,7 +238,7 @@ docker compose up -d
 
 3. Cek permission direktori data:
    ```bash
-   ls -la /home/msiserver/cloudstorage/data
+   ls -la /home/msiserver/minio/data
    ```
 
 ### Network Error
@@ -278,13 +278,13 @@ networks:
 1. **Ganti Password Default:** Pastikan mengubah `MINIO_ROOT_PASSWORD` sebelum production
 2. **Firewall:** Konfigurasi firewall untuk membatasi akses ke port 9507 dan 9508
 3. **SSL/TLS:** Untuk production, gunakan reverse proxy (seperti Traefik) dengan SSL certificate
-4. **Backup:** Lakukan backup rutin pada direktori `/home/msiserver/cloudstorage/data`
+4. **Backup:** Lakukan backup rutin pada direktori `/home/msiserver/minio/data`
 
 ## Backup dan Restore
 
 ### Backup Data
 ```bash
-tar -czf minio-backup-$(date +%Y%m%d).tar.gz /home/msiserver/cloudstorage/data
+tar -czf minio-backup-$(date +%Y%m%d).tar.gz /home/msiserver/minio/data
 ```
 
 ### Restore Data
