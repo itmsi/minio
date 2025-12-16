@@ -10,23 +10,8 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
     networks:
-      - traefik-network
+      - infra_net
     labels:
-      # Enable Traefik
-      - "traefik.enable=true"
-      
-      # Router untuk MinIO S3 API (port 9000) - HTTP (Cloudflare handle HTTPS)
-      - "traefik.http.routers.minio-api.rule=Host(`minio-api.motorsights.com`)"
-      - "traefik.http.routers.minio-api.entrypoints=web"
-      - "traefik.http.routers.minio-api.service=minio-api"
-      - "traefik.http.services.minio-api.loadbalancer.server.port=9000"
-      
-      # Router untuk MinIO Console (port 9001) - HTTP (Cloudflare handle HTTPS)
-      - "traefik.http.routers.minio-console.rule=Host(`minio-console.motorsights.com`)"
-      - "traefik.http.routers.minio-console.entrypoints=web"
-      - "traefik.http.routers.minio-console.service=minio-console"
-      - "traefik.http.services.minio-console.loadbalancer.server.port=9001"
-      
       - "com.centurylinklabs.watchtower.enable=false"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -43,8 +28,7 @@ services:
           cpus: '0.25'
           memory: 128M
 
-# TAMBAHKAN INI:
 networks:
-  traefik-network:
-    external: true  # PENTING! Gunakan network yang sudah ada
-    name: traefik-network  # Nama network yang sama dengan Traefik
+  infra_net:
+    external: true
+    name: infra_net
