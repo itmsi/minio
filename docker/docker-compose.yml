@@ -23,12 +23,6 @@ services:
     networks:
       - infra_net
 
-    labels:
-      - "com.centurylinklabs.watchtower.enable=false"
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+networks:
+  infra_net:
+    external: true
