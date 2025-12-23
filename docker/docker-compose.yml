@@ -15,10 +15,10 @@ services:
 
     volumes:
       # Opsi 1: Named Volume (Recommended - lebih reliable)
-      # - minio_data:/data
+      - minio_data:/data
       
       # Opsi 2: Bind Mount (jika perlu akses langsung ke filesystem)
-      - /home/msiserver/minio/data:/data
+      # - /home/msiserver/minio/data:/data
 
     command: server /data --console-address ":9001"
 
