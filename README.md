@@ -598,3 +598,53 @@ Jika mengalami masalah, cek:
 2. Status container: `docker compose ps`
 3. Dokumentasi MinIO: https://min.io/docs/
 
+
+
+2. Konfigurasi lengkap yang disarankan
+Untuk akses dari dalam Docker network (infra_net):
+
+# MinIO Configuration
+MINIO_ENABLED=true
+S3_PROVIDER=minio
+S3_REGION=us-east-1
+S3_BUCKET=msi-quotation
+
+# Credentials
+S3_ACCESS_KEY_ID=admin
+S3_SECRET_ACCESS_KEY=Rubysa179596!
+
+# Endpoint (internal Docker network)
+S3_ENDPOINT=http://cloudstorage-minio:9000
+S3_BASE_URL=http://cloudstorage-minio:9000
+S3_SSL_ENABLED=false
+S3_FORCE_PATH_STYLE=true
+S3_SIGNATURE_VERSION=v4
+
+# MinIO Private Bucket Configuration
+S3_BUCKET_PRIVATE=msi-sso-private
+MINIO_BUCKET_PRIVATE=msi-sso-private
+AWS_BUCKET_PRIVATE=msi-sso-private
+
+
+Untuk akses dari luar Docker network (via domain):
+# MinIO Configuration
+MINIO_ENABLED=true
+S3_PROVIDER=minio
+S3_REGION=us-east-1
+S3_BUCKET=msi-quotation
+
+# Credentials
+S3_ACCESS_KEY_ID=admin
+S3_SECRET_ACCESS_KEY=Rubysa179596!
+
+# Endpoint (public domain)
+S3_ENDPOINT=https://minio-api.motorsights.com
+S3_BASE_URL=https://minio-api.motorsights.com
+S3_SSL_ENABLED=true  # ← HARUS true untuk HTTPS
+S3_FORCE_PATH_STYLE=true
+S3_SIGNATURE_VERSION=v4
+
+# MinIO Private Bucket Configuration
+S3_BUCKET_PRIVATE=msi-sso-private
+MINIO_BUCKET_PRIVATE=msi-sso-private
+AWS_BUCKET_PRIVATE=msi-sso-private
