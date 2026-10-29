@@ -23,6 +23,9 @@ cd /opt/minio
 #       ./scripts/export-minio.sh --stop /path/output
 ```
 
+**Untuk migrasi final (agar tidak ada data hilang) pakai `--stop`.** Downtime hanya selama
+copy data (±1 menit untuk ~800 MB); container otomatis di-start lagi walaupun export gagal.
+
 Default-nya MinIO **tetap berjalan** (tidak ada downtime); copy berjalan read-only dengan
 prioritas CPU/IO rendah. File yang sedang di-upload tepat saat copy bisa tidak ikut.
 Hasilnya `minio-migration-<tanggal>.zip` + `.zip.sha256`.
@@ -40,6 +43,17 @@ chmod +x import-minio.sh
 ./import-minio.sh minio-migration-XXXX.zip /opt/minio
 ```
 
+**Server baru sudah punya MinIO** (container `cloudstorage-minio` / volume `docker_minio_data`
+sudah ada)? Pakai `--replace`:
+
+```bash
+./import-minio.sh --replace minio-migration-XXXX.zip /opt/minio
+```
+
+Data lama di volume di-backup dulu ke `/opt/minio/backup-before-import-*.tar.gz`, compose lama ke
+`docker/docker-compose.yml.bak-*`, lalu diganti dengan isi zip. Compose dari zip **wajib** dipakai
+karena user/policy MinIO terenkripsi dengan `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` server lama.
+
 Script akan:
 1. Cek checksum zip & isi bundle
 2. Batal jika container `cloudstorage-minio` atau volume `docker_minio_data` sudah ada (tidak menimpa data)
@@ -54,7 +68,10 @@ Jika Claude diminta melakukan import:
 - Baca `MANIFEST.txt` di dalam zip untuk mengetahui versi/volume/jumlah file.
 - Jalankan `import-minio.sh` seperti di atas. Jangan pakai `docker pull` untuk MinIO —
   gunakan image dari zip agar versinya sama (lihat `minio_version` di manifest).
-- Jangan hapus volume/container yang sudah ada tanpa konfirmasi user.
+- Jangan hapus volume/container yang sudah ada tanpa konfirmasi user. Jika MinIO sudah terinstal
+  dan user setuju menggantinya, pakai `--replace` (otomatis backup dulu). Jika MinIO yang ada memakai
+  nama container/volume lain, script akan berhenti karena port 9000/9001 terpakai: tanya user dulu
+  sebelum menghentikannya.
 - Setelah selesai, verifikasi: `docker exec cloudstorage-minio ls /data` harus menampilkan
   bucket yang sama dengan `buckets` di manifest, dan login console dengan user lama berhasil.
 - Reverse proxy / Cloudflare tunnel untuk `minio-api.motorsights.com` dan

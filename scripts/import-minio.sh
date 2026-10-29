@@ -1,18 +1,27 @@
 #!/bin/bash
 
 # Script untuk import MinIO dari file zip hasil export-minio.sh di server baru.
-# Usage: ./import-minio.sh <minio-migration-XXXX.zip> [install_dir]
+# Usage: ./import-minio.sh [--replace] <minio-migration-XXXX.zip> [install_dir]
 #
 # install_dir default: /opt/minio (konfigurasi docker-compose akan diletakkan di sini)
+# --replace : server baru SUDAH punya MinIO (container/volume yang sama). Data lama di
+#             volume di-backup dulu ke $INSTALL_DIR/backup-before-import-*.tar.gz, docker-compose.yml
+#             lama di-backup ke *.bak-*, lalu container & volume lama diganti dengan isi zip.
 
 set -euo pipefail
+
+REPLACE=false
+if [ "${1:-}" = "--replace" ]; then
+    REPLACE=true
+    shift
+fi
 
 ZIP_FILE="${1:-}"
 INSTALL_DIR="${2:-/opt/minio}"
 CONTAINER="cloudstorage-minio"
 
 if [ -z "$ZIP_FILE" ] || [ ! -f "$ZIP_FILE" ]; then
-    echo "Usage: $0 <minio-migration-XXXX.zip> [install_dir]"
+    echo "Usage: $0 [--replace] <minio-migration-XXXX.zip> [install_dir]"
     exit 1
 fi
 
@@ -36,8 +45,15 @@ BUNDLE_DIR="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)"
 echo "🔍 Cek checksum isi bundle..."
 (cd "$BUNDLE_DIR" && sha256sum -c SHA256SUMS)
 
-# shellcheck disable=SC1091
-source "$BUNDLE_DIR/MANIFEST.txt"
+# Baca MANIFEST.txt sebagai key=value (jangan di-source: nilainya bisa berisi spasi/kurung)
+manifest() { grep -m1 "^$1=" "$BUNDLE_DIR/MANIFEST.txt" | cut -d= -f2-; }
+image="$(manifest image)"
+minio_version="$(manifest minio_version)"
+volume="$(manifest volume)"
+compose_project="$(manifest compose_project)"
+network="$(manifest network)"
+file_count="$(manifest file_count)"
+buckets="$(manifest buckets)"
 echo ""
 echo "  Image   : $image ($minio_version)"
 echo "  Volume  : $volume"
@@ -45,15 +61,39 @@ echo "  Files   : $file_count"
 echo "  Buckets : $buckets"
 echo ""
 
-# 2. Pastikan tidak menimpa data yang sudah ada
-if docker inspect "$CONTAINER" >/dev/null 2>&1; then
-    echo "❌ Container $CONTAINER sudah ada di server ini. Hapus/rename dulu, script dibatalkan."
-    exit 1
-fi
-if docker volume inspect "$volume" >/dev/null 2>&1; then
-    echo "❌ Volume $volume sudah ada di server ini. Script dibatalkan supaya data tidak tertimpa."
-    echo "   Jika yakin volume itu boleh dihapus: docker volume rm $volume"
-    exit 1
+# 2. Pastikan tidak menimpa data yang sudah ada (kecuali --replace, dengan backup dulu)
+STAMP="$(date +%Y%m%d-%H%M%S)"
+if [ "$REPLACE" = "true" ]; then
+    mkdir -p "$INSTALL_DIR"
+    if docker volume inspect "$volume" >/dev/null 2>&1; then
+        BACKUP_FILE="$INSTALL_DIR/backup-before-import-$STAMP.tar.gz"
+        echo "💾 Backup data volume lama $volume ke $BACKUP_FILE..."
+        docker stop "$CONTAINER" >/dev/null 2>&1 || true
+        # Container sementara (tidak dijalankan) hanya untuk membaca isi volume
+        docker create --name minio-import-backup -v "$volume:/data" "$image" >/dev/null
+        docker cp minio-import-backup:/data - | gzip > "$BACKUP_FILE"
+        docker rm minio-import-backup >/dev/null
+        echo "   ✔ Backup selesai ($(du -h "$BACKUP_FILE" | cut -f1))"
+    fi
+    if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+        echo "🗑️  Hapus container lama $CONTAINER..."
+        docker rm -f "$CONTAINER" >/dev/null
+    fi
+    if docker volume inspect "$volume" >/dev/null 2>&1; then
+        echo "🗑️  Hapus volume lama $volume (sudah di-backup)..."
+        docker volume rm "$volume" >/dev/null
+    fi
+else
+    if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+        echo "❌ Container $CONTAINER sudah ada di server ini. Script dibatalkan."
+        echo "   Untuk mengganti MinIO yang sudah ada (data lama di-backup dulu): $0 --replace $ZIP_FILE $INSTALL_DIR"
+        exit 1
+    fi
+    if docker volume inspect "$volume" >/dev/null 2>&1; then
+        echo "❌ Volume $volume sudah ada di server ini. Script dibatalkan supaya data tidak tertimpa."
+        echo "   Untuk mengganti MinIO yang sudah ada (data lama di-backup dulu): $0 --replace $ZIP_FILE $INSTALL_DIR"
+        exit 1
+    fi
 fi
 
 # 3. Load image
@@ -63,8 +103,18 @@ gunzip -c "$BUNDLE_DIR/minio-image.tar.gz" | docker load
 # 4. Konfigurasi
 echo "🔄 [2/5] Menyalin konfigurasi ke $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
-cp -rn "$BUNDLE_DIR/minio/." "$INSTALL_DIR/"
 COMPOSE_FILE="$INSTALL_DIR/docker/docker-compose.yml"
+if [ "$REPLACE" = "true" ]; then
+    # Wajib pakai compose dari server lama: data IAM di .minio.sys terenkripsi dengan
+    # MINIO_ROOT_USER/PASSWORD, kalau beda user & policy tidak bisa dibaca
+    if [ -f "$COMPOSE_FILE" ] && ! cmp -s "$COMPOSE_FILE" "$BUNDLE_DIR/minio/docker/docker-compose.yml"; then
+        cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak-$STAMP"
+        echo "   docker-compose.yml lama di-backup ke $COMPOSE_FILE.bak-$STAMP"
+    fi
+    cp -r "$BUNDLE_DIR/minio/." "$INSTALL_DIR/"
+else
+    cp -rn "$BUNDLE_DIR/minio/." "$INSTALL_DIR/"
+fi
 
 if ! docker network inspect "$network" >/dev/null 2>&1; then
     echo "🌐 Membuat network $network..."
@@ -87,6 +137,14 @@ fi
 echo "   ✔ $RESTORED_COUNT file ter-restore (sama dengan export)"
 
 # 6. Jalankan
+for port in 9000 9001; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+        echo "❌ Port 127.0.0.1:$port sudah dipakai (MinIO/aplikasi lain dengan nama container berbeda?)."
+        echo "   Data sudah ter-restore di volume $volume. Hentikan pemakai port itu, lalu:"
+        echo "   docker compose -p $compose_project -f $COMPOSE_FILE up -d"
+        exit 1
+    fi
+done
 echo "🔄 [5/5] Menjalankan MinIO..."
 docker compose -p "$compose_project" -f "$COMPOSE_FILE" up -d
 

@@ -35,6 +35,12 @@ fi
 
 IMAGE="$(docker inspect "$CONTAINER" --format '{{.Config.Image}}')"
 IMAGE_ID="$(docker inspect "$CONTAINER" --format '{{.Image}}')"
+# Pastikan tag image masih menunjuk ke image yang dipakai container (bukan hasil pull baru)
+if [ "$(docker image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null)" != "$IMAGE_ID" ]; then
+    echo "❌ Tag $IMAGE tidak lagi menunjuk ke image container ($IMAGE_ID)."
+    echo "   Jalankan: docker tag $IMAGE_ID $IMAGE   lalu ulangi export."
+    exit 1
+fi
 MINIO_VERSION="$(docker exec "$CONTAINER" minio --version 2>/dev/null | head -1 || echo unknown)"
 
 echo "📦 Export MinIO"
